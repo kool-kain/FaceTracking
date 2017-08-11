@@ -56,9 +56,9 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
                     try {
                         // load cascade file from application resources
-                        InputStream is = getResources().openRawResource(R.raw.haarcascade_frontalface_alt);
+                        InputStream is = getResources().openRawResource(R.raw.lbpcascade_frontalface);
                         File cascadeDir = getDir("cascade", Context.MODE_PRIVATE);
-                        fileCascadeFile = new File(cascadeDir, "haarcascade_frontalface_alt.xml");
+                        fileCascadeFile = new File(cascadeDir, "lbpcascade_frontalface.xml");
                         FileOutputStream os = new FileOutputStream(fileCascadeFile);
 
                         byte[] buffer = new byte[4096];
@@ -70,12 +70,11 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                         os.close();
 
                         cascadeClassifierFace = new CascadeClassifier(fileCascadeFile.getAbsolutePath());
-                        cascadeClassifierFace.load(fileCascadeFile.getAbsolutePath());
-                        if (cascadeClassifierFace.empty()) {
-                            Log.d(TAG, "Failed to load cascade classifier");
-                            cascadeClassifierFace = null;
-                        } else
-                            Log.d(TAG, "Loaded cascade classifier from " + fileCascadeFile.getAbsolutePath());
+                        if (!cascadeClassifierFace.load(fileCascadeFile.getAbsolutePath())) {
+                            Log.e(TAG, "Failed to load cascade classifier");
+                        } else {
+                            Log.i(TAG, "Loaded cascade classifier from " + fileCascadeFile.getAbsolutePath());
+                        }
 
                         cascadeDir.delete();
 
@@ -153,25 +152,25 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
 
         matRgba = inputFrame.rgba();
-        //matGray = inputFrame.gray();
-        Imgproc.cvtColor(matRgba, matGray, Imgproc.COLOR_RGB2GRAY);
+        matGray = inputFrame.gray();
+        //Imgproc.cvtColor(matRgba, matGray, Imgproc.COLOR_RGB2GRAY);
 
         //aplicar ecualización de histograma a la imagen en grises para estandarizar el contraste
         // y brillo de la imagen
-        //Imgproc.equalizeHist(matGray, matDest);
         Imgproc.equalizeHist(matGray, matDest);
 
         MatOfRect faces = new MatOfRect();
 
         if (cascadeClassifierFace != null) {
-            cascadeClassifierFace.detectMultiScale(matDest, faces, 1.2, 3, 0,
+            cascadeClassifierFace.detectMultiScale(matDest, faces, 1.05, 3, 0,
                     new Size(absoluteFaceSize, absoluteFaceSize), new Size());
         } else {
             Log.d(TAG, "Missed classifier, therefore no face detection allowed");
         }
 
-        Rect[] facesArray = faces.toArray();
-        for (Rect rect : facesArray) {
+        Log.d(TAG, "Faces length: " + faces.toArray().length);
+
+        for (Rect rect : faces.toArray()) {
             Imgproc.rectangle(matDest, rect.tl(), rect.br(), FACE_RECT_COLOR, 2);
             //Imgproc.rectangle(matDest, new Point(rect.x, rect.y), new Point(rect.x + rect.width, rect.y + rect.height),
             //FACE_RECT_COLOR, 2);
