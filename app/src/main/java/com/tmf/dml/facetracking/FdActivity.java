@@ -16,6 +16,7 @@ import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfRect;
+import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
@@ -31,12 +32,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     private static final String TAG = "OCVSample::Activity";
     private static final Scalar FACE_RECT_COLOR = new Scalar(0, 255, 0);
+    private static final Scalar EYE_RECT_COLOR = new Scalar(0, 255, 255);
     public static final int JAVA_DETECTOR = 0;
     public static final int NATIVE_DETECTOR = 1;
     public static final float EYE_SX = 0.16f;
     public static final float EYE_SY = 0.26f;
     public static final float EYE_SW = 0.30f;
-    public static final float EYE_SH = 0.38f;
+    public static final float EYE_SH = 0.28f;
 
     private MenuItem mItemFace50;
     private MenuItem mItemFace40;
@@ -62,35 +64,10 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                 case LoaderCallbackInterface.SUCCESS: {
                     Log.i(TAG, "OpenCV loaded successfully");
 
-                    try {
-                        // load cascade file from application resources
-                        InputStream is = getResources().openRawResource(R.raw.lbpcascade_frontalface);
-                        File cascadeDir = getDir("cascade", Context.MODE_PRIVATE);
-                        fileCascadeFile = new File(cascadeDir, "lbpcascade_frontalface.xml");
-                        FileOutputStream os = new FileOutputStream(fileCascadeFile);
-
-                        byte[] buffer = new byte[4096];
-                        int bytesRead;
-                        while ((bytesRead = is.read(buffer)) != -1) {
-                            os.write(buffer, 0, bytesRead);
-                        }
-                        is.close();
-                        os.close();
-
-                        cascadeClassifierFace = new CascadeClassifier(fileCascadeFile.getAbsolutePath());
-                        if (!cascadeClassifierFace.load(fileCascadeFile.getAbsolutePath())) {
-                            Log.d(TAG, "Failed to load cascade classifier");
-                            cascadeClassifierFace = null;
-                        } else {
-                            Log.d(TAG, "Loaded cascade classifier from " + fileCascadeFile.getAbsolutePath());
-                        }
-
-                        cascadeDir.delete();
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                        Log.e(TAG, "Unable to loading classifier. Exception thrown: " + e);
-                    }
+                    cascadeClassifierFace = initClassifier(R.raw.haarcascade_frontalface_alt,
+                            "haarcascade_frontalface_alt.xml");
+                    cascadeClassifierEye = initClassifier(R.raw.haarcascade_eye,
+                            "haarcascade_eye.xml");
 
                     camOpenCvCameraView.enableView();
                 }
@@ -102,6 +79,42 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
             }
         }
     };
+
+    private CascadeClassifier initClassifier(int id, String fileName) {
+        CascadeClassifier cascadeClassifier;
+
+        try {
+            // load cascade file from application resources
+            InputStream is = getResources().openRawResource(id);
+            File cascadeDir = getDir("cascade", Context.MODE_PRIVATE);
+            fileCascadeFile = new File(cascadeDir, fileName);
+            FileOutputStream os = new FileOutputStream(fileCascadeFile);
+
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = is.read(buffer)) != -1) {
+                os.write(buffer, 0, bytesRead);
+            }
+            is.close();
+            os.close();
+            cascadeDir.delete();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            Log.e(TAG, "Unable to loading classifier. Exception thrown: " + e);
+            return null;
+        }
+
+        cascadeClassifier = new CascadeClassifier(fileCascadeFile.getAbsolutePath());
+        if (!cascadeClassifier.load(fileCascadeFile.getAbsolutePath())) {
+            Log.d(TAG, "Failed to load cascade classifier");
+            cascadeClassifier = null;
+        } else {
+            Log.d(TAG, "Loaded cascade classifier from " + fileCascadeFile.getAbsolutePath());
+        }
+
+        return cascadeClassifier;
+    }
 
     public FdActivity() {
         detectorName = new String[2];
@@ -192,11 +205,53 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         for (Rect rect : faces.toArray()) {
             Imgproc.rectangle(matDest, rect.tl(), rect.br(), FACE_RECT_COLOR, 2);
+            detectEyes(rect);
+
         }
+
 
         return matDest;
     }
 
+    private void detectEyes(Rect rect) {
+        Mat faceCloned = matDest.submat(rect);
+        MatOfRect leftEye = new MatOfRect(), rightEye = new MatOfRect();
+
+        int leftX = Math.round(faceCloned.cols() * EYE_SX);
+        int topY = Math.round(faceCloned.rows() * EYE_SY);
+        int widthX = Math.round(faceCloned.cols() * EYE_SW);
+        int heightY = Math.round(faceCloned.rows() * EYE_SH);
+        int rightX = (int) Math.round(faceCloned.cols() * (1.0 - EYE_SX - EYE_SW));
+
+        Mat topLeftOfFace = faceCloned.submat(new Rect(leftX, topY, widthX, heightY));
+        Mat topRightOfFace = faceCloned.submat(new Rect(rightX, topY, widthX, heightY));
+
+        if (cascadeClassifierEye != null) {
+            cascadeClassifierEye.detectMultiScale(topLeftOfFace, leftEye);
+            cascadeClassifierEye.detectMultiScale(topRightOfFace, rightEye);
+        }
+        Rect[] leftEyeArray = leftEye.toArray();
+        if (leftEyeArray.length > 0) {
+            Imgproc.rectangle(matDest,
+                    new Point(leftEyeArray[0].x + leftX + rect.x, leftEyeArray[0].y + topY + rect.y),
+                    new Point(leftEyeArray[0].width + widthX + rect.x - 5,
+                            leftEyeArray[0].height + heightY + rect.y),
+                    EYE_RECT_COLOR, 2);
+        } else {
+            Log.d(TAG, "Couldn't find left eye. LeftEye length: " + leftEyeArray.length);
+        }
+
+        Rect[] rightEyeArray = rightEye.toArray();
+        if (rightEyeArray.length > 0) {
+            Imgproc.rectangle(matDest,
+                    new Point(rightEyeArray[0].x + rightX + leftX + rect.x, rightEyeArray[0].y + topY + rect.y),
+                    new Point(rightEyeArray[0].width + widthX + rect.x + 5,
+                            rightEyeArray[0].height + heightY + rect.y),
+                    EYE_RECT_COLOR, 2);
+        } else {
+            Log.d(TAG, "Couldn't find right eye. RightEye length: " + rightEyeArray.length);
+        }
+    }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
