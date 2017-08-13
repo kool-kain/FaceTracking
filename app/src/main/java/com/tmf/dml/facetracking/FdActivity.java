@@ -31,19 +31,27 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     private static final String TAG = "OCVSample::Activity";
     private static final Scalar FACE_RECT_COLOR = new Scalar(0, 255, 0);
-    public static final float FACE_SIZE = 0.2f;
+    public static final int JAVA_DETECTOR = 0;
+    public static final int NATIVE_DETECTOR = 1;
     public static final float EYE_SX = 0.16f;
     public static final float EYE_SY = 0.26f;
     public static final float EYE_SW = 0.30f;
     public static final float EYE_SH = 0.38f;
 
+    private MenuItem mItemFace50;
+    private MenuItem mItemFace40;
+    private MenuItem mItemFace30;
+    private MenuItem mItemFace20;
+    private MenuItem mItemType;
     private Mat matRgba;
     private Mat matGray;
     private Mat matDest;
     private File fileCascadeFile;
     private CascadeClassifier cascadeClassifierFace, cascadeClassifierEye;
-
-    private int absoluteFaceSize;
+    private int detectorType = JAVA_DETECTOR;
+    private String[] detectorName;
+    private float relativeFaceSize = 0.2f;
+    private int absoluteFaceSize = 0;
 
     private CameraBridgeViewBase camOpenCvCameraView;
 
@@ -71,9 +79,10 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
                         cascadeClassifierFace = new CascadeClassifier(fileCascadeFile.getAbsolutePath());
                         if (!cascadeClassifierFace.load(fileCascadeFile.getAbsolutePath())) {
-                            Log.e(TAG, "Failed to load cascade classifier");
+                            Log.d(TAG, "Failed to load cascade classifier");
+                            cascadeClassifierFace = null;
                         } else {
-                            Log.i(TAG, "Loaded cascade classifier from " + fileCascadeFile.getAbsolutePath());
+                            Log.d(TAG, "Loaded cascade classifier from " + fileCascadeFile.getAbsolutePath());
                         }
 
                         cascadeDir.delete();
@@ -93,6 +102,14 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
             }
         }
     };
+
+    public FdActivity() {
+        detectorName = new String[2];
+        detectorName[JAVA_DETECTOR] = "Java";
+        detectorName[NATIVE_DETECTOR] = "Native (tracking)";
+
+        Log.i(TAG, "Instantiated new " + this.getClass());
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -137,8 +154,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         matGray = new Mat();
         matDest = new Mat();
         matRgba = new Mat();
-
-        absoluteFaceSize = Math.round(height * FACE_SIZE);
     }
 
     @Override
@@ -153,43 +168,64 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         matRgba = inputFrame.rgba();
         matGray = inputFrame.gray();
-        //Imgproc.cvtColor(matRgba, matGray, Imgproc.COLOR_RGB2GRAY);
+        matDest = matRgba.clone();
 
-        //aplicar ecualización de histograma a la imagen en grises para estandarizar el contraste
-        // y brillo de la imagen
-        Imgproc.equalizeHist(matGray, matDest);
+        Imgproc.equalizeHist(matGray, matGray);
 
         MatOfRect faces = new MatOfRect();
 
+        if (absoluteFaceSize == 0) {
+            int height = matGray.rows();
+            if (Math.round(height * relativeFaceSize) > 0) {
+                absoluteFaceSize = Math.round(height * relativeFaceSize);
+            }
+        }
+
         if (cascadeClassifierFace != null) {
-            cascadeClassifierFace.detectMultiScale(matDest, faces, 1.05, 3, 0,
+            cascadeClassifierFace.detectMultiScale(matGray, faces, 1.1, 4, 0,
                     new Size(absoluteFaceSize, absoluteFaceSize), new Size());
         } else {
             Log.d(TAG, "Missed classifier, therefore no face detection allowed");
         }
 
-        Log.d(TAG, "Faces length: " + faces.toArray().length);
+        Log.d(TAG, "Faces length: " + faces.toArray().length + ". AbsFaceSize: " + absoluteFaceSize);
 
         for (Rect rect : faces.toArray()) {
             Imgproc.rectangle(matDest, rect.tl(), rect.br(), FACE_RECT_COLOR, 2);
-            //Imgproc.rectangle(matDest, new Point(rect.x, rect.y), new Point(rect.x + rect.width, rect.y + rect.height),
-            //FACE_RECT_COLOR, 2);
         }
 
-        return matRgba;
+        return matDest;
     }
+
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         Log.i(TAG, "called onCreateOptionsMenu");
-        //TODO
+        mItemFace50 = menu.add("Face size 50%");
+        mItemFace40 = menu.add("Face size 40%");
+        mItemFace30 = menu.add("Face size 30%");
+        mItemFace20 = menu.add("Face size 20%");
+        mItemType = menu.add(detectorName[detectorType]);
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        Log.i(TAG, "called onOptionsItemSelected; selected item: " + item);
-        //TODO
+        Log.d(TAG, "called onOptionsItemSelected; selected item: " + item);
+        if (item == mItemFace50)
+            setMinFaceSize(0.5f);
+        else if (item == mItemFace40)
+            setMinFaceSize(0.4f);
+        else if (item == mItemFace30)
+            setMinFaceSize(0.3f);
+        else if (item == mItemFace20)
+            setMinFaceSize(0.2f);
+
         return true;
+    }
+
+    private void setMinFaceSize(float faceSize) {
+        relativeFaceSize = faceSize;
+        absoluteFaceSize = 0;
     }
 }
