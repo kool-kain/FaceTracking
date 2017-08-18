@@ -12,6 +12,23 @@ android {
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
     }
 
+    packagingOptions {
+        exclude 'META-INF/LICENSE.txt'
+        exclude 'META-INF/NOTICE.txt'
+
+        exclude 'META-INF/maven/org.bytedeco.javacpp-presets/opencv/pom.properties'
+        exclude 'META-INF/maven/org.bytedeco.javacpp-presets/opencv/pom.xml'
+    }
+
+    // uncomment splits to decrease app size - google recommends to split only if the app is > 100mb
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi', 'armeabi-v7a'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -28,5 +45,8 @@ dependencies {
     compile 'com.android.support:appcompat-v7:22.+'
     compile 'com.android.support.constraint:constraint-layout:1.0.2'
     testCompile 'junit:junit:4.12'
+    compile files('src/main/javacv/javacpp.jar')
+    compile files('src/main/javacv/javacv.jar')
+    compile files('src/main/javacv/opencv.jar')
     compile project(':openCVLibrary330')
 }

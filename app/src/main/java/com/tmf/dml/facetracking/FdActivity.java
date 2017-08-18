@@ -28,17 +28,29 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
+import static java.lang.Math.atan2;
+import static java.lang.Math.sqrt;
+import static org.bytedeco.javacpp.opencv_core.CV_PI;
+import static org.bytedeco.javacpp.opencv_face.FaceRecognizer;
+import static org.bytedeco.javacpp.opencv_face.createFisherFaceRecognizer;
+import static org.opencv.core.Core.FONT_HERSHEY_DUPLEX;
+import static org.opencv.core.CvType.CV_8U;
+import static org.opencv.imgproc.Imgproc.warpAffine;
+
 public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     private static final String TAG = "OCVSample::Activity";
     private static final Scalar FACE_RECT_COLOR = new Scalar(0, 255, 0);
     private static final Scalar EYE_RECT_COLOR = new Scalar(0, 255, 255);
-    public static final int JAVA_DETECTOR = 0;
-    public static final int NATIVE_DETECTOR = 1;
-    public static final float EYE_SX = 0.16f;
-    public static final float EYE_SY = 0.26f;
-    public static final float EYE_SW = 0.30f;
-    public static final float EYE_SH = 0.28f;
+    private static final int JAVA_DETECTOR = 0;
+    private static final float EYE_SX = 0.16f;
+    private static final float EYE_SY = 0.26f;
+    private static final float EYE_SW = 0.30f;
+    private static final float EYE_SH = 0.28f;
+    private static final double DESIRED_LEFT_EYE_Y = 0.14;
+    private static final double DESIRED_LEFT_EYE_X = 0.19;
+    private static final int FACE_WIDTH = 100;
+    private static final int FACE_HEIGHT = 100;
 
     private MenuItem mItemFace50;
     private MenuItem mItemFace40;
@@ -48,12 +60,16 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private Mat matRgba;
     private Mat matGray;
     private Mat matDest;
+    private Rect leftEyeRectangle;
+    private Rect rightEyeRectangle;
+    private FaceRecognizer faceRecognizer;
     private File fileCascadeFile;
     private CascadeClassifier cascadeClassifierFace, cascadeClassifierEye;
     private int detectorType = JAVA_DETECTOR;
     private String[] detectorName;
     private float relativeFaceSize = 0.2f;
     private int absoluteFaceSize = 0;
+
 
     private CameraBridgeViewBase camOpenCvCameraView;
 
@@ -117,9 +133,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     }
 
     public FdActivity() {
-        detectorName = new String[2];
+        detectorName = new String[1];
         detectorName[JAVA_DETECTOR] = "Java";
-        detectorName[NATIVE_DETECTOR] = "Native (tracking)";
 
         Log.i(TAG, "Instantiated new " + this.getClass());
     }
@@ -167,6 +182,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         matGray = new Mat();
         matDest = new Mat();
         matRgba = new Mat();
+
+        faceRecognizer = createFisherFaceRecognizer();
+        //faceRecognizer = createEigenFaceRecognizer();
+        //faceRecognizer = createLBPHFaceRecognizer();
+
+        rightEyeRectangle = new Rect(0, 0, 0);
+        leftEyeRectangle = new Rect(0, 0, 0);
     }
 
     @Override
@@ -174,6 +196,9 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         matGray.release();
         matDest.release();
         matRgba.release();
+
+        faceRecognizer.clear();
+        faceRecognizer.close();
     }
 
     @Override
@@ -205,15 +230,24 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         for (Rect rect : faces.toArray()) {
             Imgproc.rectangle(matDest, rect.tl(), rect.br(), FACE_RECT_COLOR, 2);
-            detectEyes(rect);
+            if (detectEyes(rect)) {
+                //cropFace();
+                //faceRecognizing();
+                //drawFaceMarksAndText(rect, "detected!", 20);
+            } else {
+                Log.d(TAG, "Couldn't determine a completed face.");
+            }
 
         }
-
 
         return matDest;
     }
 
-    private void detectEyes(Rect rect) {
+    private void faceRecognizing() {
+        //TODO
+    }
+
+    private Boolean detectEyes(Rect rect) {
         Mat faceCloned = matDest.submat(rect);
         MatOfRect leftEye = new MatOfRect(), rightEye = new MatOfRect();
 
@@ -231,7 +265,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
             cascadeClassifierEye.detectMultiScale(topRightOfFace, rightEye);
         }
         Rect[] leftEyeArray = leftEye.toArray();
-        if (leftEyeArray.length > 0) {
+        if (leftEyeArray.length == 1) {
+            leftEyeRectangle = leftEyeArray[0];
             Imgproc.rectangle(matDest,
                     new Point(leftEyeArray[0].x + leftX + rect.x, leftEyeArray[0].y + topY + rect.y),
                     new Point(leftEyeArray[0].width + widthX + rect.x - 5,
@@ -242,15 +277,94 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         }
 
         Rect[] rightEyeArray = rightEye.toArray();
-        if (rightEyeArray.length > 0) {
+        if (rightEyeArray.length == 1) {
+            rightEyeRectangle = rightEyeArray[0];
             Imgproc.rectangle(matDest,
-                    new Point(rightEyeArray[0].x + rightX + leftX + rect.x, rightEyeArray[0].y + topY + rect.y),
+                    new Point(rightEyeArray[0].x + rightX + leftX + rect.x,
+                            rightEyeArray[0].y + topY + rect.y),
                     new Point(rightEyeArray[0].width + widthX + rect.x + 5,
                             rightEyeArray[0].height + heightY + rect.y),
                     EYE_RECT_COLOR, 2);
         } else {
             Log.d(TAG, "Couldn't find right eye. RightEye length: " + rightEyeArray.length);
         }
+
+        return (leftEyeArray.length == 1) && (rightEyeArray.length == 1);
+    }
+
+    private void cropFace() {
+        Point leftPoint = new Point(leftEyeRectangle.x + leftEyeRectangle.width / 2, leftEyeRectangle.y
+                + leftEyeRectangle.height / 2);
+        Point rightPoint = new Point(rightEyeRectangle.x + rightEyeRectangle.width / 2, rightEyeRectangle.y
+                + rightEyeRectangle.height / 2);
+        Point eyesCenter = new Point((leftPoint.x + rightPoint.x) * 0.5f,
+                (leftPoint.y + rightPoint.y) * 0.5f);
+
+        // Get the angle between the 2 eyes.
+        double dy = (rightPoint.y - leftPoint.y);
+        double dx = (rightPoint.x - leftPoint.x);
+        double len = sqrt(dx * dx + dy * dy);
+        double angle = atan2(dy, dx) * 180.0 / CV_PI;
+
+        // Hand measurements shown that the left eye center should ideally be at roughly (0.19, 0.14) of a scaled face image.
+        double desiredRightEyeX = (1.0f - DESIRED_LEFT_EYE_X);
+
+        // Get the amount we need to scale the image to be the desired fixed size we want.
+        double desiredLen = (desiredRightEyeX - DESIRED_LEFT_EYE_X) * FACE_WIDTH;
+        double scale = desiredLen / len;
+
+        // Get the transformation matrix for rotating and scaling the face to the desired angle & size.
+        Mat rotatingMat = new Mat();
+        rotatingMat = Imgproc.getRotationMatrix2D(eyesCenter, angle, scale);
+
+        // Shift the center of the eyes to be the desired center between the eyes.
+        double buff[] = new double[(int) (rotatingMat.total() * rotatingMat.channels())];
+        rotatingMat.get(0, 2, buff);
+        for (Double pixel : buff) {
+            pixel = FACE_WIDTH * 0.5f - eyesCenter.x;
+        }
+        rotatingMat.put(0, 2, buff);
+
+        buff = new double[(int) (rotatingMat.total() * rotatingMat.channels())];
+        rotatingMat.get(1, 2, buff);
+        for (Double pixel : buff) {
+            pixel = FACE_HEIGHT * DESIRED_LEFT_EYE_Y - eyesCenter.y;
+        }
+        rotatingMat.put(1, 2, buff);
+
+        Mat warped = new Mat(FACE_HEIGHT, FACE_WIDTH, CV_8U, new Scalar(128));
+
+        warpAffine(matDest, warped, rotatingMat, warped.size());
+    }
+
+    private void drawFaceMarksAndText(Rect rect, String msg, final int LINE_WIDTH) {
+        Rect r = rect;
+
+        Imgproc.line(matDest, new Point(r.x, r.y), new Point(r.x, r.y + LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(r.x, r.y), new Point(r.x + LINE_WIDTH, r.y), FACE_RECT_COLOR, 3);
+
+        Imgproc.line(matDest, new Point(r.x + r.width, r.y),
+                new Point(r.x + r.width, r.y + LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(r.x + r.width, r.y),
+                new Point(r.x + r.width - LINE_WIDTH, r.y), FACE_RECT_COLOR, 3);
+
+        Imgproc.line(matDest, new Point(r.x, r.y + r.height),
+                new Point(r.x, r.y + r.height - LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(r.x, r.y + r.height),
+                new Point(r.x + LINE_WIDTH, r.y + r.height), FACE_RECT_COLOR, 3);
+
+        Imgproc.line(matDest, new Point(r.x + r.width, r.y + r.height),
+                new Point(r.x + r.width, r.y + r.height - LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(r.x + r.width, r.y + r.height),
+                new Point(r.x + r.width - LINE_WIDTH, r.y + r.height), FACE_RECT_COLOR, 3);
+
+        int font = FONT_HERSHEY_DUPLEX;
+        Size s = Imgproc.getTextSize(msg, font, 1, 1, null);
+
+        double x = (matDest.cols() - s.width) / 2;
+        double y = rect.y + rect.height + s.height + 5;
+
+        Imgproc.putText(matDest, msg, new Point(x, y), font, 1.0, new Scalar(255, 0, 0));
     }
 
     @Override
