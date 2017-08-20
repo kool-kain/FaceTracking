@@ -28,6 +28,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
+import resources_manager.ImagesProvider;
+
 import static java.lang.Math.atan2;
 import static java.lang.Math.sqrt;
 import static org.bytedeco.javacpp.opencv_core.CV_PI;
@@ -39,9 +41,9 @@ import static org.opencv.imgproc.Imgproc.warpAffine;
 
 public class FdActivity extends Activity implements CvCameraViewListener2 {
 
-    private static final String TAG = "OCVSample::Activity";
+    private static final String TAG = "FdActivity::Activity";
     private static final Scalar FACE_RECT_COLOR = new Scalar(0, 255, 0);
-    private static final Scalar EYE_RECT_COLOR = new Scalar(0, 255, 255);
+    private static final Scalar TEXT_COLOR = new Scalar(255, 0, 0);
     private static final int JAVA_DETECTOR = 0;
     private static final float EYE_SX = 0.16f;
     private static final float EYE_SY = 0.26f;
@@ -63,10 +65,12 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private Rect leftEyeRectangle;
     private Rect rightEyeRectangle;
     private FaceRecognizer faceRecognizer;
+    private ImagesProvider imagesProvider;
     private File fileCascadeFile;
     private CascadeClassifier cascadeClassifierFace, cascadeClassifierEye;
     private int detectorType = JAVA_DETECTOR;
     private String[] detectorName;
+    private String msg;
     private float relativeFaceSize = 0.2f;
     private int absoluteFaceSize = 0;
 
@@ -84,6 +88,9 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                             "haarcascade_frontalface_alt.xml");
                     cascadeClassifierEye = initClassifier(R.raw.haarcascade_eye,
                             "haarcascade_eye.xml");
+
+                    imagesProvider = new ImagesProvider(getResources(),
+                            getDir("trainingDir", Context.MODE_PRIVATE));
 
                     camOpenCvCameraView.enableView();
                 }
@@ -229,11 +236,10 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         Log.d(TAG, "Faces length: " + faces.toArray().length + ". AbsFaceSize: " + absoluteFaceSize);
 
         for (Rect rect : faces.toArray()) {
-            Imgproc.rectangle(matDest, rect.tl(), rect.br(), FACE_RECT_COLOR, 2);
             if (detectEyes(rect)) {
-                //cropFace();
-                //faceRecognizing();
-                //drawFaceMarksAndText(rect, "detected!", 20);
+                cropFace();
+                msg = faceRecognizing();
+                drawFaceMarksAndText(rect, msg, 20);
             } else {
                 Log.d(TAG, "Couldn't determine a completed face.");
             }
@@ -243,8 +249,12 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         return matDest;
     }
 
-    private void faceRecognizing() {
-        //TODO
+    private String faceRecognizing() {
+        String recognizing = new String();
+
+        //First we recognized gender by training with a vector of male faces
+        //faceRecognizer.train();
+        return recognizing;
     }
 
     private Boolean detectEyes(Rect rect) {
@@ -267,11 +277,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         Rect[] leftEyeArray = leftEye.toArray();
         if (leftEyeArray.length == 1) {
             leftEyeRectangle = leftEyeArray[0];
-            Imgproc.rectangle(matDest,
-                    new Point(leftEyeArray[0].x + leftX + rect.x, leftEyeArray[0].y + topY + rect.y),
-                    new Point(leftEyeArray[0].width + widthX + rect.x - 5,
-                            leftEyeArray[0].height + heightY + rect.y),
-                    EYE_RECT_COLOR, 2);
         } else {
             Log.d(TAG, "Couldn't find left eye. LeftEye length: " + leftEyeArray.length);
         }
@@ -279,12 +284,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         Rect[] rightEyeArray = rightEye.toArray();
         if (rightEyeArray.length == 1) {
             rightEyeRectangle = rightEyeArray[0];
-            Imgproc.rectangle(matDest,
-                    new Point(rightEyeArray[0].x + rightX + leftX + rect.x,
-                            rightEyeArray[0].y + topY + rect.y),
-                    new Point(rightEyeArray[0].width + widthX + rect.x + 5,
-                            rightEyeArray[0].height + heightY + rect.y),
-                    EYE_RECT_COLOR, 2);
         } else {
             Log.d(TAG, "Couldn't find right eye. RightEye length: " + rightEyeArray.length);
         }
@@ -338,25 +337,24 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     }
 
     private void drawFaceMarksAndText(Rect rect, String msg, final int LINE_WIDTH) {
-        Rect r = rect;
 
-        Imgproc.line(matDest, new Point(r.x, r.y), new Point(r.x, r.y + LINE_WIDTH), FACE_RECT_COLOR, 3);
-        Imgproc.line(matDest, new Point(r.x, r.y), new Point(r.x + LINE_WIDTH, r.y), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x, rect.y), new Point(rect.x, rect.y + LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x, rect.y), new Point(rect.x + LINE_WIDTH, rect.y), FACE_RECT_COLOR, 3);
 
-        Imgproc.line(matDest, new Point(r.x + r.width, r.y),
-                new Point(r.x + r.width, r.y + LINE_WIDTH), FACE_RECT_COLOR, 3);
-        Imgproc.line(matDest, new Point(r.x + r.width, r.y),
-                new Point(r.x + r.width - LINE_WIDTH, r.y), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x + rect.width, rect.y),
+                new Point(rect.x + rect.width, rect.y + LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x + rect.width, rect.y),
+                new Point(rect.x + rect.width - LINE_WIDTH, rect.y), FACE_RECT_COLOR, 3);
 
-        Imgproc.line(matDest, new Point(r.x, r.y + r.height),
-                new Point(r.x, r.y + r.height - LINE_WIDTH), FACE_RECT_COLOR, 3);
-        Imgproc.line(matDest, new Point(r.x, r.y + r.height),
-                new Point(r.x + LINE_WIDTH, r.y + r.height), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x, rect.y + rect.height),
+                new Point(rect.x, rect.y + rect.height - LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x, rect.y + rect.height),
+                new Point(rect.x + LINE_WIDTH, rect.y + rect.height), FACE_RECT_COLOR, 3);
 
-        Imgproc.line(matDest, new Point(r.x + r.width, r.y + r.height),
-                new Point(r.x + r.width, r.y + r.height - LINE_WIDTH), FACE_RECT_COLOR, 3);
-        Imgproc.line(matDest, new Point(r.x + r.width, r.y + r.height),
-                new Point(r.x + r.width - LINE_WIDTH, r.y + r.height), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x + rect.width, rect.y + rect.height),
+                new Point(rect.x + rect.width, rect.y + rect.height - LINE_WIDTH), FACE_RECT_COLOR, 3);
+        Imgproc.line(matDest, new Point(rect.x + rect.width, rect.y + rect.height),
+                new Point(rect.x + rect.width - LINE_WIDTH, rect.y + rect.height), FACE_RECT_COLOR, 3);
 
         int font = FONT_HERSHEY_DUPLEX;
         Size s = Imgproc.getTextSize(msg, font, 1, 1, null);
@@ -364,7 +362,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         double x = (matDest.cols() - s.width) / 2;
         double y = rect.y + rect.height + s.height + 5;
 
-        Imgproc.putText(matDest, msg, new Point(x, y), font, 1.0, new Scalar(255, 0, 0));
+        Imgproc.putText(matDest, msg, new Point(x, y), font, 1.0, TEXT_COLOR);
     }
 
     @Override
