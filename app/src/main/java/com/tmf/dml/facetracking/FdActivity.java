@@ -3,11 +3,17 @@ package com.tmf.dml.facetracking;
 import android.app.Activity;
 import android.content.Context;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.WindowManager;
 
+import org.bytedeco.javacpp.DoublePointer;
+import org.bytedeco.javacpp.IntPointer;
+import org.bytedeco.javacpp.Pointer;
+import org.bytedeco.javacpp.opencv_core;
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
@@ -28,6 +34,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
+import data.FaceRecognizerElements;
 import resources_manager.ImagesProvider;
 
 import static java.lang.Math.atan2;
@@ -43,7 +50,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     private static final String TAG = "FdActivity::Activity";
     private static final Scalar FACE_RECT_COLOR = new Scalar(0, 255, 0);
-    private static final Scalar TEXT_COLOR = new Scalar(255, 0, 0);
+    private static final Scalar TEXT_COLOR = new Scalar(255);
     private static final int JAVA_DETECTOR = 0;
     private static final float EYE_SX = 0.16f;
     private static final float EYE_SY = 0.26f;
@@ -51,27 +58,31 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private static final float EYE_SH = 0.28f;
     private static final double DESIRED_LEFT_EYE_Y = 0.14;
     private static final double DESIRED_LEFT_EYE_X = 0.19;
-    private static final int FACE_WIDTH = 100;
-    private static final int FACE_HEIGHT = 100;
+    private static final int FACE_WIDTH = 320;
+    private static final int FACE_HEIGHT = 243;
+    private static final double THERESOLD = 90;
 
     private MenuItem mItemFace50;
     private MenuItem mItemFace40;
-    private MenuItem mItemFace30;
-    private MenuItem mItemFace20;
     private MenuItem mItemType;
+    private int detectorType = JAVA_DETECTOR;
+    private String[] detectorName;
     private Mat matRgba;
     private Mat matGray;
     private Mat matDest;
+    private Mat matCropFace;
+    private MatOfRect faces;
     private Rect leftEyeRectangle;
     private Rect rightEyeRectangle;
-    private FaceRecognizer faceRecognizer;
+    private FaceRecognizer faceRecognizerFace;
+    private FaceRecognizer faceRecognizerEmotion;
     private ImagesProvider imagesProvider;
     private File fileCascadeFile;
     private CascadeClassifier cascadeClassifierFace, cascadeClassifierEye;
-    private int detectorType = JAVA_DETECTOR;
-    private String[] detectorName;
     private String msg;
-    private float relativeFaceSize = 0.2f;
+    private IntPointer label;
+    DoublePointer confidence;
+    private float relativeFaceSize = 0.3f;
     private int absoluteFaceSize = 0;
 
 
@@ -92,6 +103,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                     imagesProvider = new ImagesProvider(getResources(),
                             getDir("trainingDir", Context.MODE_PRIVATE));
 
+                    faceRecognizerFace = createFisherFaceRecognizer();
+                    faceRecognizerFace.setThreshold(THERESOLD);
+                    faceRecognizerEmotion = createFisherFaceRecognizer();
+                    faceRecognizerEmotion.setThreshold(THERESOLD + 10);
+
+                    initTrainers();
+
                     camOpenCvCameraView.enableView();
                 }
                 break;
@@ -103,6 +121,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         }
     };
 
+    @Nullable
     private CascadeClassifier initClassifier(int id, String fileName) {
         CascadeClassifier cascadeClassifier;
 
@@ -150,8 +169,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     public void onCreate(Bundle savedInstanceState) {
         Log.i(TAG, "called onCreate");
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.face_detect_surface_view);
 
         camOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.fd_activity_surface_view);
@@ -189,13 +208,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         matGray = new Mat();
         matDest = new Mat();
         matRgba = new Mat();
-
-        faceRecognizer = createFisherFaceRecognizer();
-        //faceRecognizer = createEigenFaceRecognizer();
-        //faceRecognizer = createLBPHFaceRecognizer();
+        matCropFace = new Mat();
 
         rightEyeRectangle = new Rect(0, 0, 0);
         leftEyeRectangle = new Rect(0, 0, 0);
+
+        label = new IntPointer(1);
+        confidence = new DoublePointer(1);
     }
 
     @Override
@@ -203,9 +222,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         matGray.release();
         matDest.release();
         matRgba.release();
-
-        faceRecognizer.clear();
-        faceRecognizer.close();
+        matCropFace.release();
     }
 
     @Override
@@ -217,7 +234,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         Imgproc.equalizeHist(matGray, matGray);
 
-        MatOfRect faces = new MatOfRect();
+        faces = new MatOfRect();
 
         if (absoluteFaceSize == 0) {
             int height = matGray.rows();
@@ -237,61 +254,151 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         for (Rect rect : faces.toArray()) {
             if (detectEyes(rect)) {
-                cropFace();
-                msg = faceRecognizing();
+                Mat matCropFaceGray = new Mat();
+                Imgproc.cvtColor(matCropFace, matCropFaceGray, Imgproc.COLOR_BGRA2GRAY);
+                Imgproc.resize(matCropFaceGray, matCropFace, new Size(FACE_WIDTH, FACE_HEIGHT));
+
+                msg = "S: " + faceRecognizingGender() + ". Mood: " + faceRecognizingEmotion();
+
                 drawFaceMarksAndText(rect, msg, 20);
+                Log.d(TAG, "Detected: " + msg);
+                matCropFaceGray.release();
             } else {
                 Log.d(TAG, "Couldn't determine a completed face.");
             }
-
         }
+
+        faces.release();
+        matGray.release();
+        matRgba.release();
+        matCropFace.release();
 
         return matDest;
     }
 
-    private String faceRecognizing() {
-        String recognizing = new String();
+    private void initTrainers() {
+        //First we recognized gender by training with a vector of labelled faces
+        FaceRecognizerElements faceRecognizerElements = imagesProvider.getAllImagesGenderLabelled();
+        if (faceRecognizerElements != null && faceRecognizerElements.getMatVector() != null
+                && faceRecognizerElements.getLabels() != null) {
+            faceRecognizerFace.train(faceRecognizerElements.getMatVector(),
+                    faceRecognizerElements.getLabels());
+        } else {
+            Log.d(TAG, "Couldn't training faces model");
+        }
 
-        //First we recognized gender by training with a vector of male faces
-        //faceRecognizer.train();
+        //And we recognized emotions by training with a vector of labelled emotion
+        FaceRecognizerElements faceRecognizerElementsEmotions = imagesProvider.getAllImagesEmotionsLabelled();
+        if (faceRecognizerElementsEmotions != null && faceRecognizerElementsEmotions.getMatVector() != null
+                && faceRecognizerElementsEmotions.getLabels() != null) {
+            faceRecognizerEmotion.train(faceRecognizerElementsEmotions.getMatVector(),
+                    faceRecognizerElementsEmotions.getLabels());
+        } else {
+            Log.d(TAG, "Couldn't training emotions model");
+        }
+    }
+
+    private String faceRecognizingGender() {
+        String recognizing = "Unknown";
+        //Need to convert to Mat of JavaCV package in order to faceRecognizer to run
+        opencv_core.Mat matJavaCv = new opencv_core.Mat((Pointer) null) {
+            {
+                address = matCropFace.getNativeObjAddr();
+            }
+        };
+
+        if (matJavaCv != null) {
+
+            label.put(-1);
+            faceRecognizerFace.predict(matJavaCv, label, confidence);
+            int predictedLabel = label.get();
+
+            if (ImagesProvider.LABEL_MALE.equals(predictedLabel)) {
+                recognizing = "Man";
+            } else if (ImagesProvider.LABEL_FEMALE.equals(predictedLabel)) {
+                recognizing = "Woman";
+            }
+        } else {
+            Log.d(TAG, "Mat conversion failed. Couldn't predict face");
+        }
+        matJavaCv.close();
+        matJavaCv.deallocate();
         return recognizing;
     }
 
+    private String faceRecognizingEmotion() {
+        String recognizing = "Unknown";
+        //Need to convert to Mat of JavaCV package in order to faceRecognizer to run
+        opencv_core.Mat matJavaCv = new opencv_core.Mat((Pointer) null) {
+            {
+                address = matCropFace.getNativeObjAddr();
+            }
+        };
+
+        if (matJavaCv != null) {
+
+            label.put(-1);
+            faceRecognizerEmotion.predict(matJavaCv, label, confidence);
+            int predictedLabel = label.get();
+
+            if (ImagesProvider.Emotions.SAD.getTag().equals(predictedLabel))
+                recognizing = ImagesProvider.Emotions.SAD.getEmotion();
+            else if (ImagesProvider.Emotions.HAPPY.getTag().equals(predictedLabel))
+                recognizing = ImagesProvider.Emotions.HAPPY.getEmotion();
+            else if (ImagesProvider.Emotions.NORMAL.getTag().equals(predictedLabel))
+                recognizing = ImagesProvider.Emotions.NORMAL.getEmotion();
+            else if (ImagesProvider.Emotions.SLEEPY.getTag().equals(predictedLabel))
+                recognizing = ImagesProvider.Emotions.SLEEPY.getEmotion();
+            else if (ImagesProvider.Emotions.SURPRISED.getTag().equals(predictedLabel))
+                recognizing = ImagesProvider.Emotions.SURPRISED.getEmotion();
+        } else {
+            Log.d(TAG, "Mat conversion failed. Couldn't predict emotion");
+        }
+        matJavaCv.close();
+        matJavaCv.deallocate();
+        return recognizing;
+    }
+
+    @NonNull
     private Boolean detectEyes(Rect rect) {
-        Mat faceCloned = matDest.submat(rect);
+        matCropFace = matDest.submat(rect);
         MatOfRect leftEye = new MatOfRect(), rightEye = new MatOfRect();
 
-        int leftX = Math.round(faceCloned.cols() * EYE_SX);
-        int topY = Math.round(faceCloned.rows() * EYE_SY);
-        int widthX = Math.round(faceCloned.cols() * EYE_SW);
-        int heightY = Math.round(faceCloned.rows() * EYE_SH);
-        int rightX = (int) Math.round(faceCloned.cols() * (1.0 - EYE_SX - EYE_SW));
+        int leftX = Math.round(matCropFace.cols() * EYE_SX);
+        int topY = Math.round(matCropFace.rows() * EYE_SY);
+        int widthX = Math.round(matCropFace.cols() * EYE_SW);
+        int heightY = Math.round(matCropFace.rows() * EYE_SH);
+        int rightX = (int) Math.round(matCropFace.cols() * (1.0 - EYE_SX - EYE_SW));
 
-        Mat topLeftOfFace = faceCloned.submat(new Rect(leftX, topY, widthX, heightY));
-        Mat topRightOfFace = faceCloned.submat(new Rect(rightX, topY, widthX, heightY));
+        Mat topLeftOfFace = matCropFace.submat(new Rect(leftX, topY, widthX, heightY));
+        Mat topRightOfFace = matCropFace.submat(new Rect(rightX, topY, widthX, heightY));
 
         if (cascadeClassifierEye != null) {
             cascadeClassifierEye.detectMultiScale(topLeftOfFace, leftEye);
             cascadeClassifierEye.detectMultiScale(topRightOfFace, rightEye);
         }
         Rect[] leftEyeArray = leftEye.toArray();
-        if (leftEyeArray.length == 1) {
+        if (leftEyeArray.length > 0) {
             leftEyeRectangle = leftEyeArray[0];
         } else {
             Log.d(TAG, "Couldn't find left eye. LeftEye length: " + leftEyeArray.length);
         }
 
         Rect[] rightEyeArray = rightEye.toArray();
-        if (rightEyeArray.length == 1) {
+        if (rightEyeArray.length > 0) {
             rightEyeRectangle = rightEyeArray[0];
         } else {
             Log.d(TAG, "Couldn't find right eye. RightEye length: " + rightEyeArray.length);
         }
 
-        return (leftEyeArray.length == 1) && (rightEyeArray.length == 1);
+        topLeftOfFace.release();
+        topRightOfFace.release();
+        return (leftEyeArray.length > 0) && (rightEyeArray.length > 0);
     }
 
+    @Deprecated
     private void cropFace() {
+
         Point leftPoint = new Point(leftEyeRectangle.x + leftEyeRectangle.width / 2, leftEyeRectangle.y
                 + leftEyeRectangle.height / 2);
         Point rightPoint = new Point(rightEyeRectangle.x + rightEyeRectangle.width / 2, rightEyeRectangle.y
@@ -331,9 +438,11 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         }
         rotatingMat.put(1, 2, buff);
 
-        Mat warped = new Mat(FACE_HEIGHT, FACE_WIDTH, CV_8U, new Scalar(128));
+        matCropFace = new Mat(FACE_WIDTH, FACE_HEIGHT, CV_8U, new Scalar(128));
 
-        warpAffine(matDest, warped, rotatingMat, warped.size());
+        warpAffine(matDest, matCropFace, rotatingMat, matCropFace.size());
+
+        rotatingMat.release();
     }
 
     private void drawFaceMarksAndText(Rect rect, String msg, final int LINE_WIDTH) {
@@ -362,7 +471,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         double x = (matDest.cols() - s.width) / 2;
         double y = rect.y + rect.height + s.height + 5;
 
-        Imgproc.putText(matDest, msg, new Point(x, y), font, 1.0, TEXT_COLOR);
+        Imgproc.putText(matDest, msg, new Point(x, y), font, 1, TEXT_COLOR, 2);
     }
 
     @Override
@@ -370,8 +479,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         Log.i(TAG, "called onCreateOptionsMenu");
         mItemFace50 = menu.add("Face size 50%");
         mItemFace40 = menu.add("Face size 40%");
-        mItemFace30 = menu.add("Face size 30%");
-        mItemFace20 = menu.add("Face size 20%");
         mItemType = menu.add(detectorName[detectorType]);
         return true;
     }
@@ -383,10 +490,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
             setMinFaceSize(0.5f);
         else if (item == mItemFace40)
             setMinFaceSize(0.4f);
-        else if (item == mItemFace30)
-            setMinFaceSize(0.3f);
-        else if (item == mItemFace20)
-            setMinFaceSize(0.2f);
+        else if (item == mItemType)
+            detectorName[detectorType] = "Java";
 
         return true;
     }

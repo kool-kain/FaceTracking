@@ -19,16 +19,43 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map.Entry;
 
+import data.FaceRecognizerElements;
+
 import static org.bytedeco.javacpp.opencv_core.CV_32SC1;
 import static org.bytedeco.javacpp.opencv_imgcodecs.CV_LOAD_IMAGE_GRAYSCALE;
 import static org.bytedeco.javacpp.opencv_imgcodecs.imread;
 
 public class ImagesProvider {
     private static final String TAG = "ImagesProvider::class";
+    public static final Integer LABEL_MALE = 0;
+    public static final Integer LABEL_FEMALE = 1;
     private Resources resources;
-    private R.drawable drawableResources;
     private ArrayList<File> trainingMaleArray;
     private ArrayList<File> trainingFemaleArray;
+
+    public enum Emotions {
+        SAD("sad", 0),
+        HAPPY("happy", 1),
+        NORMAL("normal", 2),
+        SLEEPY("sleepy", 3),
+        SURPRISED("surprised", 4);
+
+        private final String emotion;
+        private final Integer tag;
+
+        Emotions(String emotion, Integer tag) {
+            this.emotion = emotion;
+            this.tag = tag;
+        }
+
+        public String getEmotion() {
+            return this.emotion;
+        }
+
+        public Integer getTag() {
+            return this.tag;
+        }
+    }
 
     public ImagesProvider(Resources resources, File trainingDir) {
 
@@ -43,10 +70,10 @@ public class ImagesProvider {
         R.drawable drawableResources = new R.drawable();
         for (Field f : drawables) {
             try {
-                if (f.getName().startsWith("subject11")) {
-                    hMapFemaleImages.put(f.getInt(drawableResources), f.getName());
-                } else if (f.getName().startsWith("subject")) {
+                if (f.getName().startsWith("male")) {
                     hMapMaleImages.put(f.getInt(drawableResources), f.getName());
+                } else if (f.getName().startsWith("female")) {
+                    hMapFemaleImages.put(f.getInt(drawableResources), f.getName());
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -90,50 +117,90 @@ public class ImagesProvider {
         return resultTraining;
     }
 
-    public MatVector getMaleImages() {
-        MatVector malePics = new MatVector(trainingMaleArray.size());
+    public FaceRecognizerElements getAllImagesGenderLabelled() {
+        Integer maleSize = trainingMaleArray.size();
+        Integer femaleSize = trainingFemaleArray.size();
 
-        Mat labels = new Mat(malePics.size(), 1, CV_32SC1);
+        MatVector allPics = new MatVector(maleSize + femaleSize);
+        Mat labels = new Mat(maleSize + femaleSize, 1, CV_32SC1);
+        Mat imgFromResource = new Mat();
         IntBuffer labelsBuf = labels.createBuffer();
 
         int counter = 0;
 
         for (File image : trainingMaleArray) {
 
-            Mat imgFromResource = imread(image.getAbsolutePath(), CV_LOAD_IMAGE_GRAYSCALE);
+            imgFromResource = imread(image.getAbsolutePath(), CV_LOAD_IMAGE_GRAYSCALE);
+            Log.d(TAG, "Path: " + image.getAbsolutePath() + " || Label: " + LABEL_MALE);
+            allPics.put(counter, imgFromResource);
 
-            //Named as subjectXX, so we label as XX
-            int label = Integer.parseInt(image.getName().substring(7, 8));
-            Log.d(TAG, "Path: " + image.getAbsolutePath() + " || Label: " + label);
-            malePics.put(counter, imgFromResource);
-
-            labelsBuf.put(counter, label);
+            labelsBuf.put(counter, LABEL_MALE);
 
             counter++;
         }
-        return malePics;
+
+        for (File image : trainingFemaleArray) {
+
+            imgFromResource = imread(image.getAbsolutePath(), CV_LOAD_IMAGE_GRAYSCALE);
+            Log.d(TAG, "Path: " + image.getAbsolutePath() + " || Label: " + LABEL_FEMALE);
+            allPics.put(counter, imgFromResource);
+
+            labelsBuf.put(counter, LABEL_FEMALE);
+
+            counter++;
+        }
+        imgFromResource.release();
+        return new FaceRecognizerElements(allPics, labels);
     }
 
-    public MatVector getFemaleImages() {
-        MatVector femalePics = new MatVector(trainingFemaleArray.size());
+    public FaceRecognizerElements getAllImagesEmotionsLabelled() {
+        Integer maleSize = trainingMaleArray.size();
+        Integer femaleSize = trainingFemaleArray.size();
 
-        Mat labels = new Mat(femalePics.size(), 1, CV_32SC1);
+        MatVector emotionsPics = new MatVector(maleSize + femaleSize);
+        Mat labels = new Mat(maleSize + femaleSize, 1, CV_32SC1);
+        Mat imgFromResource = new Mat();
         IntBuffer labelsBuf = labels.createBuffer();
 
         int counter = 0;
+        int label = -1;
 
-        for (File image : trainingFemaleArray) {
-            Mat imgFromResource = imread(image.getAbsolutePath(), CV_LOAD_IMAGE_GRAYSCALE);
+        for (File image : trainingMaleArray) {
 
-            //Named as subjectXX, so we label as XX
-            int label = Integer.parseInt(image.getName().substring(7, 8));
-
-            femalePics.put(counter, imgFromResource);
+            imgFromResource = imread(image.getAbsolutePath(), CV_LOAD_IMAGE_GRAYSCALE);
+            label = determineLabel(image.getName());
+            Log.d(TAG, "Path: " + image.getAbsolutePath() + " || Label: " + label);
+            emotionsPics.put(counter, imgFromResource);
 
             labelsBuf.put(counter, label);
 
             counter++;
         }
-        return femalePics;
+
+        for (File image : trainingFemaleArray) {
+
+            imgFromResource = imread(image.getAbsolutePath(), CV_LOAD_IMAGE_GRAYSCALE);
+            label = determineLabel(image.getName());
+            Log.d(TAG, "Path: " + image.getAbsolutePath() + " || Label: " + LABEL_FEMALE);
+            emotionsPics.put(counter, imgFromResource);
+
+            labelsBuf.put(counter, label);
+
+            counter++;
+        }
+
+        imgFromResource.release();
+        return new FaceRecognizerElements(emotionsPics, labels);
+    }
+
+    private Integer determineLabel(String fileName) {
+        Integer label = fileName.contains(Emotions.SAD.getEmotion()) ? Emotions.SAD.getTag()
+                : fileName.contains(Emotions.HAPPY.getEmotion()) ? Emotions.HAPPY.getTag()
+                : fileName.contains(Emotions.NORMAL.getEmotion()) ? Emotions.NORMAL.getTag()
+                : fileName.contains(Emotions.SLEEPY.getEmotion()) ? Emotions.SLEEPY.getTag()
+                : fileName.contains(Emotions.SURPRISED.getEmotion()) ? Emotions.SURPRISED.getTag()
+                //other options are consireded normal
+                : Emotions.NORMAL.getTag();
+        return label;
     }
 }
