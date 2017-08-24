@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
@@ -25,11 +26,10 @@ import static org.bytedeco.javacpp.opencv_core.CV_32SC1;
 import static org.bytedeco.javacpp.opencv_imgcodecs.CV_LOAD_IMAGE_GRAYSCALE;
 import static org.bytedeco.javacpp.opencv_imgcodecs.imread;
 
-public class ImagesProvider {
+public class ImagesProvider implements Serializable {
     private static final String TAG = "ImagesProvider::class";
     public static final Integer LABEL_MALE = 0;
     public static final Integer LABEL_FEMALE = 1;
-    private Resources resources;
     private ArrayList<File> trainingMaleArray;
     private ArrayList<File> trainingFemaleArray;
 
@@ -57,10 +57,7 @@ public class ImagesProvider {
         }
     }
 
-    public ImagesProvider(Resources resources, File trainingDir) {
-
-        this.resources = resources;
-
+    public void generateFiles(Resources resources, File trainingDir) {
         HashMap<Integer, String> hMapMaleImages = new HashMap<Integer, String>();
         HashMap<Integer, String> hMapFemaleImages = new HashMap<Integer, String>();
         trainingMaleArray = new ArrayList<File>();
@@ -80,15 +77,16 @@ public class ImagesProvider {
             }
         }
 
-        trainingFemaleArray = generateTrainingDirWithImages(hMapFemaleImages, trainingDir);
-        trainingMaleArray = generateTrainingDirWithImages(hMapMaleImages, trainingDir);
+        trainingFemaleArray = generateTrainingDirWithImages(resources, hMapFemaleImages, trainingDir);
+        trainingMaleArray = generateTrainingDirWithImages(resources, hMapMaleImages, trainingDir);
 
         Log.d(TAG, "Male size: " + trainingMaleArray.size() +
                 "Female size: " + trainingFemaleArray.size());
     }
 
     @Nullable
-    private ArrayList<File> generateTrainingDirWithImages(HashMap<Integer, String> hMap, File trainingDir) {
+    private ArrayList<File> generateTrainingDirWithImages(Resources resources,
+                                                          HashMap<Integer, String> hMap, File trainingDir) {
 
         ArrayList<File> resultTraining = new ArrayList<File>();
         try {
@@ -117,9 +115,13 @@ public class ImagesProvider {
         return resultTraining;
     }
 
+    @Nullable
     public FaceRecognizerElements getAllImagesGenderLabelled() {
         Integer maleSize = trainingMaleArray.size();
         Integer femaleSize = trainingFemaleArray.size();
+
+        if (maleSize + femaleSize <= 0)
+            return null;
 
         MatVector allPics = new MatVector(maleSize + femaleSize);
         Mat labels = new Mat(maleSize + femaleSize, 1, CV_32SC1);
@@ -153,9 +155,13 @@ public class ImagesProvider {
         return new FaceRecognizerElements(allPics, labels);
     }
 
+    @Nullable
     public FaceRecognizerElements getAllImagesEmotionsLabelled() {
         Integer maleSize = trainingMaleArray.size();
         Integer femaleSize = trainingFemaleArray.size();
+
+        if (maleSize + femaleSize <= 0)
+            return null;
 
         MatVector emotionsPics = new MatVector(maleSize + femaleSize);
         Mat labels = new Mat(maleSize + femaleSize, 1, CV_32SC1);
@@ -199,7 +205,7 @@ public class ImagesProvider {
                 : fileName.contains(Emotions.NORMAL.getEmotion()) ? Emotions.NORMAL.getTag()
                 : fileName.contains(Emotions.SLEEPY.getEmotion()) ? Emotions.SLEEPY.getTag()
                 : fileName.contains(Emotions.SURPRISED.getEmotion()) ? Emotions.SURPRISED.getTag()
-                //other options are consireded normal
+                //other options are considered normal
                 : Emotions.NORMAL.getTag();
         return label;
     }

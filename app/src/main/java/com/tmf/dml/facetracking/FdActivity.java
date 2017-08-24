@@ -2,6 +2,7 @@ package com.tmf.dml.facetracking;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -34,12 +35,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
+import data.FaceRecognizerElements;
 import resources_manager.ImagesProvider;
 
 import static java.lang.Math.atan2;
 import static java.lang.Math.sqrt;
 import static org.bytedeco.javacpp.opencv_core.CV_PI;
 import static org.bytedeco.javacpp.opencv_face.FaceRecognizer;
+import static org.bytedeco.javacpp.opencv_face.createFisherFaceRecognizer;
 import static org.opencv.core.Core.FONT_HERSHEY_DUPLEX;
 import static org.opencv.core.CvType.CV_8U;
 import static org.opencv.imgproc.Imgproc.warpAffine;
@@ -58,7 +61,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private static final double DESIRED_LEFT_EYE_X = 0.19;
     private static final int FACE_WIDTH = 320;
     private static final int FACE_HEIGHT = 243;
-    private static final double THERESOLD = 90;
 
     private MenuItem mItemFace50;
     private MenuItem mItemFace40;
@@ -75,6 +77,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private FaceRecognizer faceRecognizerFace;
     private FaceRecognizer faceRecognizerEmotion;
     private ImagesProvider imagesProvider;
+    private FaceRecognizerElements faceRecognizerElementsFaces;
+    private FaceRecognizerElements faceRecognizerElementsEmotions;
     private File fileCascadeFile;
     private CascadeClassifier cascadeClassifierFace, cascadeClassifierEye;
     private String msg;
@@ -97,16 +101,14 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                             "haarcascade_frontalface_alt.xml");
                     cascadeClassifierEye = initClassifier(R.raw.haarcascade_eye,
                             "haarcascade_eye.xml");
-                    /*
-                    imagesProvider = new ImagesProvider(getResources(),
-                            getDir("trainingDir", Context.MODE_PRIVATE));
 
+                    if (imagesProvider != null) {
+                        faceRecognizerElementsFaces = imagesProvider.getAllImagesGenderLabelled();
+                        faceRecognizerElementsEmotions = imagesProvider.getAllImagesEmotionsLabelled();
+                    }
                     faceRecognizerFace = createFisherFaceRecognizer();
-                    faceRecognizerFace.setThreshold(THERESOLD);
                     faceRecognizerEmotion = createFisherFaceRecognizer();
-                    faceRecognizerEmotion.setThreshold(THERESOLD + 10);
-
-                    initTrainers();*/
+                    initTrainers();
 
                     camOpenCvCameraView.enableView();
                 }
@@ -156,6 +158,26 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         return cascadeClassifier;
     }
 
+    private void initTrainers() {
+        //First we recognized gender by training with a vector of labelled faces
+        if (faceRecognizerElementsFaces != null && faceRecognizerElementsFaces.getMatVector() != null
+                && faceRecognizerElementsFaces.getLabels() != null) {
+            faceRecognizerFace.train(faceRecognizerElementsFaces.getMatVector(),
+                    faceRecognizerElementsFaces.getLabels());
+        } else {
+            Log.d(TAG, "Couldn't training faces model");
+        }
+
+        //And we recognized emotions by training with a vector of labelled emotion
+        if (faceRecognizerElementsEmotions != null && faceRecognizerElementsEmotions.getMatVector() != null
+                && faceRecognizerElementsEmotions.getLabels() != null) {
+            faceRecognizerEmotion.train(faceRecognizerElementsEmotions.getMatVector(),
+                    faceRecognizerElementsEmotions.getLabels());
+        } else {
+            Log.d(TAG, "Couldn't training emotions model");
+        }
+    }
+
     public FdActivity() {
         detectorName = new String[1];
         detectorName[JAVA_DETECTOR] = "Java";
@@ -171,17 +193,10 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.face_detect_surface_view);
 
-        faceRecognizerFace = new FaceRecognizer((Pointer) null) {
-            {
-                address = (long) getIntent().getExtras().get("faceRFaces");
-            }
-        };
+        Intent intent = this.getIntent();
+        Bundle bundle = intent.getExtras();
+        imagesProvider = (ImagesProvider) bundle.getSerializable("imgPro");
 
-        faceRecognizerEmotion = new FaceRecognizer((Pointer) null) {
-            {
-                address = (long) getIntent().getExtras().get("faceREmotions");
-            }
-        };
         camOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.fd_activity_surface_view);
         camOpenCvCameraView.setVisibility(CameraBridgeViewBase.VISIBLE);
         camOpenCvCameraView.setCvCameraViewListener(this);
@@ -263,15 +278,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         for (Rect rect : faces.toArray()) {
             if (detectEyes(rect)) {
-                Mat matCropFaceGray = new Mat();
-                Imgproc.cvtColor(matCropFace, matCropFaceGray, Imgproc.COLOR_BGRA2GRAY);
-                Imgproc.resize(matCropFaceGray, matCropFace, new Size(FACE_WIDTH, FACE_HEIGHT));
+                Imgproc.cvtColor(matCropFace, matCropFace, Imgproc.COLOR_BGRA2GRAY);
+                Imgproc.resize(matCropFace, matCropFace, new Size(FACE_WIDTH, FACE_HEIGHT));
 
                 msg = "S: " + faceRecognizingGender() + ". Mood: " + faceRecognizingEmotion();
 
                 drawFaceMarksAndText(rect, msg, 20);
                 Log.d(TAG, "Detected: " + msg);
-                matCropFaceGray.release();
             } else {
                 Log.d(TAG, "Couldn't determine a completed face.");
             }
