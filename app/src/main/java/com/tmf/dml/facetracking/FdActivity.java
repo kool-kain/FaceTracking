@@ -34,14 +34,12 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
-import data.FaceRecognizerElements;
 import resources_manager.ImagesProvider;
 
 import static java.lang.Math.atan2;
 import static java.lang.Math.sqrt;
 import static org.bytedeco.javacpp.opencv_core.CV_PI;
 import static org.bytedeco.javacpp.opencv_face.FaceRecognizer;
-import static org.bytedeco.javacpp.opencv_face.createFisherFaceRecognizer;
 import static org.opencv.core.Core.FONT_HERSHEY_DUPLEX;
 import static org.opencv.core.CvType.CV_8U;
 import static org.opencv.imgproc.Imgproc.warpAffine;
@@ -99,7 +97,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                             "haarcascade_frontalface_alt.xml");
                     cascadeClassifierEye = initClassifier(R.raw.haarcascade_eye,
                             "haarcascade_eye.xml");
-
+                    /*
                     imagesProvider = new ImagesProvider(getResources(),
                             getDir("trainingDir", Context.MODE_PRIVATE));
 
@@ -108,7 +106,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                     faceRecognizerEmotion = createFisherFaceRecognizer();
                     faceRecognizerEmotion.setThreshold(THERESOLD + 10);
 
-                    initTrainers();
+                    initTrainers();*/
 
                     camOpenCvCameraView.enableView();
                 }
@@ -173,6 +171,17 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.face_detect_surface_view);
 
+        faceRecognizerFace = new FaceRecognizer((Pointer) null) {
+            {
+                address = (long) getIntent().getExtras().get("faceRFaces");
+            }
+        };
+
+        faceRecognizerEmotion = new FaceRecognizer((Pointer) null) {
+            {
+                address = (long) getIntent().getExtras().get("faceREmotions");
+            }
+        };
         camOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.fd_activity_surface_view);
         camOpenCvCameraView.setVisibility(CameraBridgeViewBase.VISIBLE);
         camOpenCvCameraView.setCvCameraViewListener(this);
@@ -274,28 +283,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         matCropFace.release();
 
         return matDest;
-    }
-
-    private void initTrainers() {
-        //First we recognized gender by training with a vector of labelled faces
-        FaceRecognizerElements faceRecognizerElements = imagesProvider.getAllImagesGenderLabelled();
-        if (faceRecognizerElements != null && faceRecognizerElements.getMatVector() != null
-                && faceRecognizerElements.getLabels() != null) {
-            faceRecognizerFace.train(faceRecognizerElements.getMatVector(),
-                    faceRecognizerElements.getLabels());
-        } else {
-            Log.d(TAG, "Couldn't training faces model");
-        }
-
-        //And we recognized emotions by training with a vector of labelled emotion
-        FaceRecognizerElements faceRecognizerElementsEmotions = imagesProvider.getAllImagesEmotionsLabelled();
-        if (faceRecognizerElementsEmotions != null && faceRecognizerElementsEmotions.getMatVector() != null
-                && faceRecognizerElementsEmotions.getLabels() != null) {
-            faceRecognizerEmotion.train(faceRecognizerElementsEmotions.getMatVector(),
-                    faceRecognizerElementsEmotions.getLabels());
-        } else {
-            Log.d(TAG, "Couldn't training emotions model");
-        }
     }
 
     private String faceRecognizingGender() {
